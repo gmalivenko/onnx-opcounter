@@ -44,7 +44,8 @@ def onnx_node_attributes_to_dict(args):
 
 
 def calculate_flops(model: onnx.ModelProto) -> int:
-    raise  NotImplemented
+    raise NotImplemented
+
 # def calculate_flops(model: onnx.ModelProto) -> int:
 #     onnx_nodes = model.graph.node
 #
