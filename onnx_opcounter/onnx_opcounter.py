@@ -43,6 +43,8 @@ def onnx_node_attributes_to_dict(args):
     return {arg.name: onnx_attribute_to_dict(arg) for arg in args}
 
 
+def calculate_flops(model: onnx.ModelProto) -> int:
+    raise  NotImplemented
 # def calculate_flops(model: onnx.ModelProto) -> int:
 #     onnx_nodes = model.graph.node
 #
