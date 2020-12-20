@@ -1,6 +1,6 @@
 # ONNX Operations Counter
 
-Counts number of parameters / FLOPS for ONNX models. 
+Counts number of parameters / MACs for ONNX models. 
 
 [WIP]
 
@@ -17,9 +17,9 @@ pip install onnx_opcounter
 onnx_opcounter {path_to_onnx_model}
 ```
 
-### Using CLI (calculate number of parameters and FLOPS)
+### Using CLI (calculate number of parameters and MACs)
 ```bash
-onnx_opcounter --calculate-flops {path_to_onnx_model}
+onnx_opcounter --calculate-macs {path_to_onnx_model}
 ```
 
 ### Using API

@@ -43,52 +43,97 @@ def onnx_node_attributes_to_dict(args):
     return {arg.name: onnx_attribute_to_dict(arg) for arg in args}
 
 
-def calculate_flops(model: onnx.ModelProto) -> int:
-    raise NotImplemented
+def calculate_macs(model: onnx.ModelProto) -> int:
+    onnx_nodes = model.graph.node
+    onnx_weights = model.graph.initializer
 
-# def calculate_flops(model: onnx.ModelProto) -> int:
-#     onnx_nodes = model.graph.node
-#
-#     onnx_weights = model.graph.initializer
-#     node_names = [i.name for i in onnx_nodes]
-#     node_types = [i.op_type for i in onnx_nodes]
-#
-#     weights = {}
-#     for onnx_w in onnx_weights:
-#         try:
-#             if len(onnx_w.ListFields()) < 4:
-#                 onnx_extracted_weights_name = onnx_w.ListFields()[1][1]
-#             else:
-#                 onnx_extracted_weights_name = onnx_w.ListFields()[2][1]
-#             weights[onnx_extracted_weights_name] = weight = numpy_helper.to_array(onnx_w)
-#         except:
-#             onnx_extracted_weights_name = onnx_w.ListFields()[3][1]
-#             weights[onnx_extracted_weights_name] = weight = numpy_helper.to_array(onnx_w)
-#         print(onnx_extracted_weights_name, weight.shape)
-#
-#     for node in onnx_nodes:
-#       print(onnx_node_attributes_to_dict(node.attribute))
-#
-#     for node in node_names:
-#         intermediate_tensor_name = node
-#         intermediate_layer_value_info = onnx.helper.ValueInfoProto()
-#         intermediate_layer_value_info.name = intermediate_tensor_name
-#         model.graph.output.extend([intermediate_layer_value_info])
-#
-#     onnx.save(model, '+all-intermediate.onnx')
-#
-#     print(node_names, node_types)
-#     print(onnx_nodes[1].input)
-#     # intermediate_tensor_name = "convolution_output74"
-#     # intermediate_layer_value_info = helper.ValueInfoProto()
-#     # intermediate_layer_value_info.name = intermediate_tensor_name
-#     # model.graph.output.extend([intermediate_layer_value_info])
-#     # onnx.save(model, model_path)
-#
-#     # # Load model itself
-#     # model = onnx.load(model_path)
-#
-#     print(len(node_names))
-#     sess = rt.InferenceSession('+all-intermediate.onnx')
-#     output = sess.run(node_names, {'data': np.zeros((1,3,224,224), dtype=np.float32)})
-#     print(len(output))
+    graph_weights = [w.name for w in onnx_weights]
+    graph_inputs = [i.name for i in model.graph.input]
+    graph_outputs = [i.name for i in model.graph.output]
+
+    input_sample = {}
+    type_mapping = {
+        1: np.float32,
+        7: np.int64,
+    }
+    for graph_input in model.graph.input:
+        if graph_input.name not in graph_weights:
+            input_sample[graph_input.name] = \
+                np.zeros([i.dim_value for i in graph_input.type.tensor_type.shape.dim],
+                         dtype=type_mapping[graph_input.type.tensor_type.elem_type])
+
+    def get_mapping_for_node(node, graph_outputs):
+        for output in node.output:
+            if output in graph_outputs:
+                return output
+        return node.name
+
+    output_name_mapping = {node.name: get_mapping_for_node(node, graph_outputs) for node in onnx_nodes}
+    output_mapping = {}
+
+    for name in output_name_mapping:
+        output = output_name_mapping[name]
+        if output in graph_outputs:
+            output_mapping[name] = graph_outputs.index(output)
+        else:
+            intermediate_layer_value_info = onnx.helper.ValueInfoProto()
+            intermediate_layer_value_info.name = output
+            model.graph.output.extend([intermediate_layer_value_info])
+            graph_outputs.append(output)
+            output_mapping[name] = graph_outputs.index(output)
+
+        print(name, '->', output, 'index', output_mapping[name])
+
+    onnx.save(model, '+all-intermediate.onnx')
+
+    sess = rt.InferenceSession('+all-intermediate.onnx')
+    output = sess.run(graph_outputs, input_sample)
+
+    output_shapes = {**{k: input_sample[k].shape for k in input_sample},
+                     **{i: output[output_mapping[i]].shape for i in output_mapping}
+                     }
+
+    def conv_macs(node, input_shape, output_shape, attrs):
+        kernel_ops = np.prod(attrs['kernel_shape'])  # Kw x Kh
+        bias_ops = len(node.input) == 3
+
+        group = 1
+        if 'group' in attrs:
+            group = attrs['group']
+
+        in_channels = input_shape[1]
+
+        return np.prod(output_shape) * (in_channels // group * kernel_ops + bias_ops)
+
+    def gemm_macs(node, input_shape, output_shape, attrs):
+        bias_ops = 1 if len(node.input) == 3 else 0
+
+        # return (np.prod(input_shape) + bias_ops) * np.prod(output_shape)
+        return np.prod(input_shape) * np.prod(output_shape)
+
+    def bn_macs(node, input_shape, output_shape, attrs):
+        raise NotImplemented
+
+    def relu_macs(node, input_shape, output_shape, attrs):
+        return np.prod(input_shape)
+
+    def no_macs(*args, **kwargs):
+        return 0
+
+    MAC_CALCULATORS = {
+        'Conv': conv_macs,
+        'Gemm': gemm_macs,
+        'MatMul': gemm_macs,
+        'BatchNormalization': bn_macs,
+        'Relu': relu_macs,
+        'Add': relu_macs,
+        # 'GlobalAveragePool': no_macs,
+        'Reshape': no_macs,
+    }
+
+    macs = 0
+    for node in onnx_nodes:
+        output_shape = output_shapes[node.name]
+        input_shape = output_shapes[node.input[0]]
+        macs += MAC_CALCULATORS[node.op_type](node, input_shape, output_shape, onnx_node_attributes_to_dict(node.attribute))
+    return macs
