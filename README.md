@@ -1,8 +1,10 @@
-# ONNX Operations Counter
+# ONNX Operations Counter [WIP]
+
+[![GitHub License](https://img.shields.io/badge/Apache-2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Downloads](https://pepy.tech/badge/onnx_opcounter)](https://pepy.tech/project/onnx_opcounter)
+![PyPI](https://img.shields.io/pypi/v/onnx_opcounter.svg)
 
 Counts number of parameters / MACs for ONNX models. 
-
-[WIP]
 
 ## Installation
 
