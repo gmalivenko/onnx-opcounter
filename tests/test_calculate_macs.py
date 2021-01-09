@@ -14,9 +14,11 @@ def check_macs(model, input):
 
     with tempfile.TemporaryDirectory() as tmp:
         torch.onnx.export(model, input, os.path.join(tmp, "_model.onnx"),
-                          verbose=True, input_names=['input'], output_names=['output'])
+                          verbose=True, input_names=['input'], output_names=['output'], opset_version=9)
         onnx_model = onnx.load_model(os.path.join(tmp, "_model.onnx"))
         onnx_macs = calculate_macs(onnx_model)
+        print('macs', macs)
+        print('onnx_macs', onnx_macs)
         assert int(macs) == int(onnx_macs)
 
 
@@ -67,3 +69,38 @@ def test_linear_case1(inputs, outputs, bias):
 
     input = torch.randn((1, inputs))
     check_macs(model, input)
+
+
+@pytest.mark.parametrize('inputs', [1, 32, 64, 128, 256])
+@pytest.mark.parametrize('outputs', [1, 32, 64, 128])
+@pytest.mark.parametrize('affine', [False])
+def test_bn_case1(inputs, outputs, affine):
+    model = nn.Sequential(nn.BatchNorm2d(
+        inputs, outputs, affine=affine
+    ))
+    model.eval()
+
+    input = torch.randn((1, inputs, 224, 224))
+    check_macs(model, input)
+
+
+@pytest.mark.parametrize('inputs', [1, 32, 64, 128, 256])
+@pytest.mark.parametrize('scale_factor', [1, 2, 3, 5])
+@pytest.mark.parametrize('mode', ['bilinear', 'nearest'])
+# @pytest.mark.parametrize('mode', ['linear', 'nearest'])
+def test_upsample_case1(inputs, scale_factor, mode):
+    model = nn.Sequential(nn.Upsample(
+        scale_factor=scale_factor, mode=mode
+    ),)
+    model.eval()
+
+    input = torch.randn((1, inputs,  32, 32))
+    check_macs(model, input)
+#
+# model = nn.Sequential(nn.Upsample(
+#     scale_factor=4, mode='bilinear'
+# ),)
+# model.eval()
+#
+# input = torch.randn((1, 32,  224, 224))
+# check_macs(model, input)

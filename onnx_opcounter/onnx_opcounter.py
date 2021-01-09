@@ -12,7 +12,7 @@ def calculate_params(model: onnx.ModelProto) -> int:
         try:
             weight = numpy_helper.to_array(onnx_w)
             params += np.prod(weight.shape)
-        except:
+        except Exception as _:
             pass
 
     return params
@@ -56,6 +56,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
         1: np.float32,
         7: np.int64,
     }
+
     for graph_input in model.graph.input:
         if graph_input.name not in graph_weights:
             input_sample[graph_input.name] = \
@@ -106,13 +107,22 @@ def calculate_macs(model: onnx.ModelProto) -> int:
         return np.prod(output_shape) * (in_channels // group * kernel_ops + bias_ops)
 
     def gemm_macs(node, input_shape, output_shape, attrs):
-        bias_ops = 1 if len(node.input) == 3 else 0
-
-        # return (np.prod(input_shape) + bias_ops) * np.prod(output_shape)
         return np.prod(input_shape) * np.prod(output_shape)
 
     def bn_macs(node, input_shape, output_shape, attrs):
-        raise NotImplemented
+        batch_macs = np.prod(output_shape)
+        if len(node.input) == 5:
+            batch_macs *= 2
+        return batch_macs
+
+    def upsample_macs(node, input_shape, output_shape, attrs):
+        if 'mode' in attrs:
+            if attrs['mode'].decode('utf-8') == 'nearest':
+                return 0
+            if attrs['mode'].decode('utf-8') == 'linear':
+                return np.prod(output_shape) * 11
+        else:
+            return 0
 
     def relu_macs(node, input_shape, output_shape, attrs):
         return np.prod(input_shape)
@@ -120,20 +130,22 @@ def calculate_macs(model: onnx.ModelProto) -> int:
     def no_macs(*args, **kwargs):
         return 0
 
-    MAC_CALCULATORS = {
+    mac_calculators = {
         'Conv': conv_macs,
         'Gemm': gemm_macs,
         'MatMul': gemm_macs,
         'BatchNormalization': bn_macs,
         'Relu': relu_macs,
         'Add': relu_macs,
-        # 'GlobalAveragePool': no_macs,
         'Reshape': no_macs,
+        'Upsample': upsample_macs,
     }
 
     macs = 0
     for node in onnx_nodes:
-        output_shape = output_shapes[node.name]
-        input_shape = output_shapes[node.input[0]]
-        macs += MAC_CALCULATORS[node.op_type](node, input_shape, output_shape, onnx_node_attributes_to_dict(node.attribute))
+        node_output_shape = output_shapes[node.name]
+        node_input_shape = output_shapes[node.input[0]]
+        macs += mac_calculators[node.op_type](
+            node, node_input_shape, node_output_shape, onnx_node_attributes_to_dict(node.attribute)
+        )
     return macs

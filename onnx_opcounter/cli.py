@@ -11,7 +11,7 @@ def main():
 
     model = onnx.load(args.model)
 
-    # print('Number of parameters in the model: {}'.format(calculate_params(model)))
+    print('Number of parameters in the model: {}'.format(calculate_params(model)))
 
     if args.calculate_macs:
         print('Number of MACs in the model: {}'.format(calculate_macs(model)))
