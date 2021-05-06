@@ -9,10 +9,10 @@ def parse_requirements(filename):
 reqs = parse_requirements('requirements.txt')
 
 setup(name='onnx_opcounter',
-      version='0.0.2',
+      version='0.0.3',
       description='ONNX flops / params counter',
       author='Grigory Malivenko',
-      author_email='nerox8664@gmail.com',
+      author_email='',
       packages=find_packages(),
       install_requires=reqs,
       zip_safe=False,
