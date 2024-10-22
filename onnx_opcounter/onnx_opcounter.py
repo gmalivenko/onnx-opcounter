@@ -108,7 +108,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
         return np.prod(output_shape) * (in_channels // group * kernel_ops + bias_ops)
 
     def gemm_macs(node, input_shape, output_shape, attrs):
-        return np.prod(input_shape) * np.prod(output_shape)
+        return np.prod(input_shape) * output_shape[-1]
 
     def bn_macs(node, input_shape, output_shape, attrs):
         batch_macs = np.prod(output_shape)
