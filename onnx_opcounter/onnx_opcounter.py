@@ -45,11 +45,14 @@ def onnx_node_attributes_to_dict(args):
 
 
 def calculate_macs(model: onnx.ModelProto) -> int:
+    orig_model = model
+    model = onnx.ModelProto()
+    model.CopyFrom(orig_model)
+
     onnx_nodes = model.graph.node
     onnx_weights = model.graph.initializer
 
     graph_weights = [w.name for w in onnx_weights]
-    graph_inputs = [i.name for i in model.graph.input]
     graph_outputs = {i.name: i.name for i in model.graph.output}
 
     input_sample = {}
@@ -59,10 +62,13 @@ def calculate_macs(model: onnx.ModelProto) -> int:
         11: np.float64
     }
 
+    def to_dims(v: onnx.ValueInfoProto) -> [int]:
+        return [i.dim_value for i in v.type.tensor_type.shape.dim]
+
     for graph_input in model.graph.input:
         if graph_input.name not in graph_weights:
             input_sample[graph_input.name] = \
-                np.zeros([i.dim_value for i in graph_input.type.tensor_type.shape.dim],
+                np.zeros(to_dims(graph_input),
                          dtype=type_mapping[graph_input.type.tensor_type.elem_type])
 
     output_mapping = {k: i for i, k in enumerate(graph_outputs)}
@@ -78,20 +84,34 @@ def calculate_macs(model: onnx.ModelProto) -> int:
             assert len(model.graph.output) == len(graph_outputs)
             assert len(model.graph.output) == len(output_mapping)
 
-    onnx.save(model, '+all-intermediate.onnx')
 
-    provider = 'CPUExecutionProvider'
-    # if 'CUDAExecutionProvider' in rt.get_available_providers():
-    #     provider = 'CUDAExecutionProvider'
+    try:
+        shaped_model = onnx.ModelProto()
+        shaped_model.CopyFrom(orig_model)
+        shaped_model = onnx.shape_inference.infer_shapes(shaped_model, data_prop=True, strict_mode=True)
 
-    sess = rt.InferenceSession('+all-intermediate.onnx', providers=[provider])
-    start = time.time()
-    output = sess.run(list(graph_outputs.keys()), input_sample)
-    print("inference(s):", time.time() - start)
+        output_shapes = {**{i.name: to_dims(i) for i in shaped_model.graph.value_info},
+                         **{i.name: to_dims(i) for i in shaped_model.graph.input},
+                         **{i.name: to_dims(i) for i in shaped_model.graph.output},
+                         }
+    except onnx.shape_inference.InferenceError as e:
+        print("Shape inference failure:", e)
 
-    output_shapes = {**{k: input_sample[k].shape for k in input_sample},
-                     **{i: output[output_mapping[i]].shape for i in output_mapping}
-                     }
+        onnx.save(model, '+all-intermediate.onnx')
+
+        provider = 'CPUExecutionProvider'
+        # if 'CUDAExecutionProvider' in rt.get_available_providers():
+        #     provider = 'CUDAExecutionProvider'
+
+        sess = rt.InferenceSession('+all-intermediate.onnx', providers=[provider])
+        start = time.time()
+        output = sess.run(list(graph_outputs.keys()), input_sample)
+        print("inference(s):", time.time() - start)
+
+        output_shapes = {**{k: input_sample[k].shape for k in input_sample},
+                        **{i: output[output_mapping[i]].shape for i in output_mapping}
+                        }
+
     for w in model.graph.initializer:
         output_shapes[w.name] = list(w.dims)
 
@@ -105,7 +125,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
 
         in_channels = input_shape[1]
 
-        return np.prod(output_shape) * (in_channels // group * kernel_ops + bias_ops)
+        return np.prod(output_shape) * (in_channels // group * kernel_ops)  # + bias_ops
 
     def gemm_macs(node, input_shape, output_shape, attrs):
         return np.prod(input_shape) * output_shape[-1]
@@ -133,6 +153,8 @@ def calculate_macs(model: onnx.ModelProto) -> int:
 
     mac_calculators = {
         'Conv': conv_macs,
+        'ConvTranspose': conv_macs,
+        'Constant': no_macs,
         'Gemm': gemm_macs,
         'MatMul': gemm_macs,
         'BatchNormalization': bn_macs,
@@ -151,6 +173,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
         'Split': no_macs,
         'Cast': no_macs,
         'Upsample': upsample_macs,
+        'Resize': upsample_macs,
     }
 
     macs = 0
@@ -158,7 +181,9 @@ def calculate_macs(model: onnx.ModelProto) -> int:
     for node in onnx_nodes:
         node_output_shape = output_shapes[node.output[0]]
         if node.op_type in mac_calculators:
-            node_input_shape = output_shapes[node.input[0]]
+            node_input_shape = None
+            if len(node.input) > 0:
+                node_input_shape = output_shapes[node.input[0]]
             macs += mac_calculators[node.op_type](
                 node, node_input_shape, node_output_shape, onnx_node_attributes_to_dict(node.attribute)
             )
