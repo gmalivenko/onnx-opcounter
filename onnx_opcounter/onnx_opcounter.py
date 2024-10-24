@@ -88,6 +88,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
     try:
         shaped_model = onnx.ModelProto()
         shaped_model.CopyFrom(orig_model)
+        del shaped_model.graph.value_info[:]
         shaped_model = onnx.shape_inference.infer_shapes(shaped_model, data_prop=True, strict_mode=True)
 
         output_shapes = {**{i.name: to_dims(i) for i in shaped_model.graph.value_info},
