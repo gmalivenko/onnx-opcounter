@@ -16,4 +16,7 @@ def main():
 
     if args.calculate_macs:
         macs = calculate_macs(model)
-        print('Number of MACs in the model: {}'.format(macs), "log10:", math.log10(macs))
+        if macs > 0:
+            print('Number of MACs in the model: {}'.format(macs), "log10:", math.log10(macs))
+        else:
+            print('Number of MACs in the model: {}'.format(macs))

@@ -1,6 +1,4 @@
-import numpy as np
 import torch
-from thop import profile
 import pytest
 from torch import nn
 import tempfile
@@ -9,17 +7,25 @@ from onnx_opcounter import calculate_macs
 import onnx
 
 
-def check_macs(model, input):
-    macs, params = profile(model, inputs=(input,))
+def export_onnx(model, input):
+    tmp = tempfile.TemporaryDirectory()
+    path = os.path.join(tmp.name, "_model.onnx")
+    torch.onnx.export(model, input, path, input_names=['input'],
+                      output_names=['output'], opset_version=16, dynamo=False)
+    try:
+        return onnx.load_model(path)
+    finally:
+        tmp.cleanup()
 
-    with tempfile.TemporaryDirectory() as tmp:
-        torch.onnx.export(model, input, os.path.join(tmp, "_model.onnx"),
-                          verbose=True, input_names=['input'], output_names=['output'], opset_version=16)
-        onnx_model = onnx.load_model(os.path.join(tmp, "_model.onnx"))
-        onnx_macs = calculate_macs(onnx_model)
-        print('macs', macs)
-        print('onnx_macs', onnx_macs)
-        assert int(macs) == int(onnx_macs)
+
+def check_macs(model, input, expected_macs):
+    onnx_macs = calculate_macs(export_onnx(model, input))
+    assert int(onnx_macs) == int(expected_macs)
+
+
+def output_numel(model, input):
+    with torch.no_grad():
+        return model(input).numel()
 
 
 @pytest.mark.parametrize('inputs', [1, 11, 12])
@@ -38,7 +44,8 @@ def test_conv2d_case1(inputs, outputs, kernel_size, padding, stride, bias, dilat
     model.eval()
 
     input = torch.randn((1, inputs * groups, 224, 224))
-    check_macs(model, input)
+    expected = output_numel(model, input) * inputs * kernel_size * kernel_size
+    check_macs(model, input, expected)
 
 
 @pytest.mark.parametrize('kernel_size', [1, 3, 5, 7])
@@ -55,7 +62,8 @@ def test_convtranspose2d_case1(kernel_size, padding, stride, bias, dilation, gro
     model.eval()
 
     input = torch.randn((1, groups * 3, 224, 224))
-    check_macs(model, input)
+    expected = output_numel(model, input) * 3 * kernel_size * kernel_size
+    check_macs(model, input, expected)
 
 
 @pytest.mark.parametrize('inputs', [1, 32, 64, 128, 256])
@@ -68,42 +76,30 @@ def test_linear_case1(inputs, outputs, bias):
     model.eval()
 
     input = torch.randn((1, inputs))
-    check_macs(model, input)
+    check_macs(model, input, inputs * outputs)
 
 
 @pytest.mark.parametrize('inputs', [1, 32, 64, 128, 256])
-@pytest.mark.parametrize('outputs', [1, 32, 64, 128])
-@pytest.mark.parametrize('affine', [False])
-def test_bn_case1(inputs, outputs, affine):
+@pytest.mark.parametrize('affine', [True, False])
+def test_bn_case1(inputs, affine):
     model = nn.Sequential(nn.BatchNorm2d(
-        inputs, outputs, affine=affine
+        inputs, affine=affine
     ))
     model.eval()
 
     input = torch.randn((1, inputs, 224, 224))
-    check_macs(model, input)
+    check_macs(model, input, 2 * output_numel(model, input))
 
 
 @pytest.mark.parametrize('inputs', [1, 32, 64, 128, 256])
 @pytest.mark.parametrize('scale_factor', [1, 2, 3, 5])
 @pytest.mark.parametrize('mode', ['bilinear', 'nearest'])
-# @pytest.mark.parametrize('mode', ['linear', 'nearest'])
 def test_upsample_case1(inputs, scale_factor, mode):
-    if mode == 'nearest':
-        pytest.xfail()
-
     model = nn.Sequential(nn.Upsample(
         scale_factor=scale_factor, mode=mode
     ),)
     model.eval()
 
     input = torch.randn((1, inputs,  32, 32))
-    check_macs(model, input)
-#
-# model = nn.Sequential(nn.Upsample(
-#     scale_factor=4, mode='bilinear'
-# ),)
-# model.eval()
-#
-# input = torch.randn((1, 32,  224, 224))
-# check_macs(model, input)
+    expected = 0 if mode == 'nearest' else 11 * output_numel(model, input)
+    check_macs(model, input, expected)

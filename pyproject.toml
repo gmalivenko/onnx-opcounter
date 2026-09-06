@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onnx_opcounter"
+version = "0.1.0"
+description = "ONNX flops / params counter"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Grigory Malivenko" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=2.5",
+    "onnx>=1.22",
+]
+
+[project.optional-dependencies]
+# Only needed when shape inference fails and calculate_macs falls back to
+# running the model to discover intermediate shapes.
+runtime = ["onnxruntime>=1.29"]
+test = [
+    "pytest>=9.1",
+    "pytest-xdist>=3.8",
+    "torch>=2.14",
+    "onnxruntime>=1.29",
+]
+
+[project.scripts]
+onnx_opcounter = "onnx_opcounter.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["onnx_opcounter*"]

@@ -8,8 +8,18 @@ Counts number of parameters / MACs for ONNX models.
 
 ## Installation
 
+Requires Python 3.12 or newer.
+
 ```bash
 pip install onnx_opcounter
+```
+
+`calculate_macs` normally relies on ONNX shape inference. For the rare models where
+shape inference fails, it falls back to running the model to discover intermediate
+shapes, which additionally needs onnxruntime:
+
+```bash
+pip install onnx_opcounter[runtime]
 ```
 
 ## Basic Usage
