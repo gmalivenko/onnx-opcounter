@@ -101,6 +101,7 @@ def calculate_macs(model: onnx.ModelProto) -> int:
     input_sample = {}
     type_mapping = {
         1: np.float32,
+        6: np.int32,
         7: np.int64,
         11: np.float64
     }
